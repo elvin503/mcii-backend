@@ -461,6 +461,26 @@ app.post('/reset-votes', async (_req, res) => {
   }
 });
 
+app.post('/check-code', async (req, res) => {
+  try {
+    const { code } = req.body;
+
+    console.log("Checking code:", code);
+
+    const status = await client.get(`vote:code:${code}`);
+
+    console.log("Status:", status);
+
+    if (!status) return res.status(400).json({ message: 'Code does not exist' });
+    if (status === 'used') return res.status(400).json({ message: 'Code already used' });
+
+    res.status(200).json({ message: 'Code is valid' });
+
+  } catch (err) {
+    console.error("CHECK CODE ERROR:", err);
+    res.status(500).json({ message: 'Server error checking code' });
+  }
+});
 
 
 
