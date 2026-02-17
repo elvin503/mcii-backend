@@ -50,6 +50,8 @@ const VOTING_CODES = [
   'l9m0n1','o2p3q4','r5s6t7','u8v9w0','x1y2z3',
   'a4b5c6','d7e8f9','g0h1i2','j3k4l5','m6n7o8'
 ];
+
+// initialize codes in Redis
 (async () => {
   for (const code of VOTING_CODES) {
     await client.set(`vote:code:${code}`, 'unused', 'NX');
@@ -59,11 +61,28 @@ const VOTING_CODES = [
 
 // ================= ADMIN CODE =================
 const ADMIN_CODE = 'admin321';
-app.post('/check-admin', (req, res) => {
-  const { code } = req.body;
-  if (!code) return res.status(400).json({ message: 'No code provided' });
-  if (code === ADMIN_CODE) return res.json({ success: true, message: 'Admin verified' });
-  return res.status(401).json({ message: '❌ Invalid admin code' });
+
+// ================= CHECK ACCESS =================
+app.post('/check-access', async (req, res) => {
+  try {
+    const { code } = req.body;
+    if (!code) return res.status(400).json({ message: 'No code provided' });
+
+    // Admin login
+    if (code === ADMIN_CODE) {
+      return res.json({ success: true, type: 'admin', message: 'Admin verified' });
+    }
+
+    // Voter login
+    const status = await client.get(`vote:code:${code}`);
+    if (!status) return res.status(400).json({ message: 'Code does not exist' });
+    if (status === 'used') return res.status(400).json({ message: 'Code already used' });
+
+    return res.json({ success: true, type: 'voter', message: 'Code is valid' });
+  } catch (err) {
+    console.error("CHECK ACCESS ERROR:", err);
+    res.status(500).json({ message: 'Server error' });
+  }
 });
 
 // ================= SUPABASE PHOTO UPLOAD =================
@@ -199,8 +218,7 @@ app.post('/verify-id', uploadID.single('photo'), async (req, res) => {
 
     const result = await Tesseract.recognize(buffer, 'eng', { tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789:-.', tessedit_pageseg_mode: 6 });
     const rawText = result.data.text.toUpperCase();
-    const text = rawText.replace(/[\s\n\r]+/g, ' ').replace(/[.,]/g, '').trim();
-    const verified = text.includes("MEDINA") && text.includes("COLLEGE");
+    const verified = rawText.includes("MEDINA") && rawText.includes("COLLEGE");
 
     if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
     res.status(200).json({ verified, text: rawText });
@@ -210,20 +228,7 @@ app.post('/verify-id', uploadID.single('photo'), async (req, res) => {
   }
 });
 
-// ================= VOTING =================
-app.post('/check-code', async (req, res) => {
-  try {
-    const { code } = req.body;
-    const status = await client.get(`vote:code:${code}`);
-    if (!status) return res.status(400).json({ message: 'Code does not exist' });
-    if (status === 'used') return res.status(400).json({ message: 'Code already used' });
-    res.status(200).json({ message: 'Code is valid' });
-  } catch (err) {
-    console.error("CHECK CODE ERROR:", err);
-    res.status(500).json({ message: 'Server error checking code' });
-  }
-});
-
+// ================= MARK VOTE CODES =================
 app.post('/mark-code-used', async (req, res) => {
   const { code, studentID, name } = req.body;
   await client.multi()
@@ -233,17 +238,12 @@ app.post('/mark-code-used', async (req, res) => {
   res.status(200).json({ message: 'Code marked as used' });
 });
 
-app.post('/auth/login', async (req, res) => {
-  const voter = await client.hgetAll(`auth:voter:${req.body.studentID}`);
-  if (!voter || Object.keys(voter).length === 0) return res.status(404).json({ message: 'Voter not found' });
-  const voted = await client.exists(`vote:used:${req.body.studentID}`);
-  res.status(200).json({ voter, alreadyVoted: Boolean(voted) });
-});
-
+// ================= VOTE =================
 app.post('/vote', async (req, res) => {
   try {
     const { studentID, votes, name, code } = req.body;
     if (!studentID || !votes || Object.keys(votes).length === 0 || !code) return res.status(400).json({ message: 'Invalid vote data' });
+
     const codeStatus = await client.get(`vote:code:${code}`);
     if (!codeStatus) return res.status(400).json({ message: 'Code does not exist' });
     if (codeStatus === 'used') return res.status(403).json({ message: 'Code already used' });
