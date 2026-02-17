@@ -68,12 +68,10 @@ app.post('/check-access', async (req, res) => {
     const { code } = req.body;
     if (!code) return res.status(400).json({ message: 'No code provided' });
 
-    // Admin login
     if (code === ADMIN_CODE) {
       return res.json({ success: true, type: 'admin', message: 'Admin verified' });
     }
 
-    // Voter login
     const status = await client.get(`vote:code:${code}`);
     if (!status) return res.status(400).json({ message: 'Code does not exist' });
     if (status === 'used') return res.status(400).json({ message: 'Code already used' });
@@ -82,6 +80,20 @@ app.post('/check-access', async (req, res) => {
   } catch (err) {
     console.error("CHECK ACCESS ERROR:", err);
     res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// ================= CHECK IF STUDENT ID ALREADY VOTED =================
+app.post('/check-id', async (req, res) => {
+  try {
+    const { studentID } = req.body;
+    if (!studentID) return res.status(400).json({ message: 'No ID provided' });
+
+    const exists = await client.exists(`vote:used:${studentID}`);
+    res.status(200).json({ alreadyVoted: Boolean(exists) });
+  } catch (err) {
+    console.error("CHECK ID ERROR:", err);
+    res.status(500).json({ alreadyVoted: false });
   }
 });
 
@@ -175,11 +187,6 @@ app.delete('/vote-record/:studentID', async (req, res) => {
     console.error("Delete voter error:", err);
     res.status(500).json({ success: false, message: 'Failed to delete voter' });
   }
-});
-
-app.delete('/students/:id', async (req, res) => {
-  await client.del(`student:${req.params.id}`);
-  res.status(200).json({ success: true });
 });
 
 // ================= CANDIDATES =================
